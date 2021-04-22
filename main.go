@@ -1,36 +1,52 @@
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
+	"context"
+	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	"github.com/martinvnavarro/playwithgo-microservice/handler"
 )
 
 func main() {
-	http.HandleFunc("/", Index)
-	http.HandleFunc("/misc", Misc)
+	l := log.New(os.Stdout, "test-microservice", log.LstdFlags)
 
-	http.ListenAndServe(":9090", nil)
-}
+	hh := handler.NewIndex(l)
+	mm := handler.NewMisc(l)
 
-func Index(rw http.ResponseWriter, r *http.Request) {
-	_, err := ioutil.ReadAll(r.Body)
+	sm := http.NewServeMux()
 
-	if err != nil {
-		http.Error(rw, "Something went wrong.", http.StatusBadRequest)
-		return
+	sm.Handle("/", hh)
+	sm.Handle("/misc", mm)
+
+	s := &http.Server{
+		Addr:         ":9090",
+		Handler:      sm,
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
 	}
 
-	fmt.Fprintln(rw, "Hello World")
-}
+	go func() {
+		err := s.ListenAndServe()
 
-func Misc(rw http.ResponseWriter, r *http.Request) {
-	_, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			l.Fatal(err)
+		}
+	}()
 
-	if err != nil {
-		http.Error(rw, "Something went wrong.", http.StatusBadRequest)
-		return
-	}
+	sigChan := make(chan os.Signal)
+	signal.Notify(sigChan, os.Interrupt)
+	signal.Notify(sigChan, os.Kill)
 
-	fmt.Fprintln(rw, "You're on another page")
+	// For graceful shutdown
+	sig := <-sigChan
+	l.Println("Signal received, shutting down...", sig)
+
+	tc, _ := context.WithTimeout(context.Background(), 30*time.Second)
+
+	s.Shutdown(tc)
 }
